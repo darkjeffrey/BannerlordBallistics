@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+  <Name value="Projectile Landing Tracker"/>
+  <Id value="ProjectileLandingTracker"/>
+  <Version value="v1.0.0"/>
+  <SingleplayerModule value="true"/>
+  <MultiplayerModule value="false"/>
+  <DependedModules>
+    <DependedModule Id="Native"/>
+    <DependedModule Id="SandBoxCore"/>
+    <DependedModule Id="Sandbox"/>
+    <DependedModule Id="Bannerlord.Harmony"/>
+    <DependedModule Id="Bannerlord.ButterLib"/>
+    <DependedModule Id="Bannerlord.UIExtenderEx"/>
+    <DependedModule Id="Bannerlord.MBOptionScreen"/>
+  </DependedModules>
+  <SubModules>
+    <SubModule>
+      <Name value="ProjectileLandingTracker"/>
+      <DLLName value="ProjectileLandingTracker.dll"/>
+      <SubModuleClassType value="ProjectileLandingTracker.SubModule"/>
+      <Tags>
+        <Tag key="DedicatedServerType" value="none"/>
+        <Tag key="IsNoRenderModeElement" value="false"/>
+      </Tags>
+    </SubModule>
+  </SubModules>
+</Module>
