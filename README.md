@@ -22,7 +22,7 @@ and thrown weapons, plus ballistae, catapults and trebuchets.
   Rams and siege towers count as "other siege engines" for the light-blue highlight.
 - **Optional distance readout**, next to the marker and/or the crosshair.
 - Hides itself while a menu (Esc, inventory, ...) is open.
-- Every feature can be switched on or off in-game.
+- Every feature, and each weapon group (bows, crossbows, throwing weapons, siege engines), can be switched on or off in-game.
 
 **F9** toggles the tracker during a mission. All other options live in
 *Mod Options > Projectile Landing Tracker* (Mod Configuration Menu).

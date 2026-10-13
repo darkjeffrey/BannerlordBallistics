@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using ProjectileLandingTracker.Configuration;
 using ProjectileLandingTracker.Siege;
 using TaleWorlds.Engine;
@@ -25,6 +24,13 @@ namespace ProjectileLandingTracker.Tracking
         private const float MountHeight = 1.7f;
         private const float MountRadius = 0.6f;
 
+        // Body types a missile ignores. A raw raycast also hits physics bodies that exist only for other
+        // purposes (invisible barriers, AI limiters, agent-only collision shapes), which stopped the
+        // prediction in mid-air. CommonCollisionExcludeFlagsForMissile (0x2031B789 in v1.4.8) is the set the
+        // game uses for missiles: like the combat set, plus Barrier and Barrier3D. Enum values are
+        // compiled into this DLL, so there is no runtime lookup that could fail.
+        private const BodyFlags MissileExcludedBodyFlags = BodyFlags.CommonCollisionExcludeFlagsForMissile;
+
         private struct Target
         {
             public Vec3 Position;
@@ -33,17 +39,9 @@ namespace ProjectileLandingTracker.Tracking
             public bool IsEnemy;
         }
 
-        // The raycast overload that also reports the entity hit. It is bound by reflection, so a game
-        // version without it still builds and simply never reports siege-engine hits by raycast.
-        private delegate bool RayCastEntityDelegate(Vec3 start, Vec3 end, out float distance, out Vec3 point,
-                                                    out GameEntity entity, float thickness, BodyFlags flags);
-
         private readonly List<Target> _targets = new List<Target>();
         private readonly List<Vec3> _path = new List<Vec3>();
         private readonly SiegeSource _siege;
-
-        private RayCastEntityDelegate _rayCastEntity;
-        private bool _rayCastEntityResolved;
 
         public TrajectorySimulator(SiegeSource siege)
         {
@@ -53,9 +51,20 @@ namespace ProjectileLandingTracker.Tracking
         /// <summary>The points of the last simulated flight, if path recording was requested.</summary>
         public IReadOnlyList<Vec3> Path => _path;
 
+        /// <summary>
+        /// What stopped the last simulated flight, for the debug readout: "terrain", "agent", or the scene
+        /// entity's name and body flags.
+        /// </summary>
+        public string LastHitDescription { get; private set; } = "";
+
         /// <summary>Whether a shot is a hand-held weapon or a siege engine; decides the limits used.</summary>
         public struct ShotLimits
         {
+            /// <summary>
+            /// Drag, as the game applies it: speed -= AirFriction * speed^2 * dt. 0 = no drag.
+            /// Set per shot (siege engines read it from their missile item).
+            /// </summary>
+            public float AirFriction;
             public float MaxFlightSeconds;
             public float IgnoreNearMetres;
             public float TargetRange;
@@ -137,6 +146,7 @@ namespace ProjectileLandingTracker.Tracking
         {
             impact = start;
             kind = HitKind.Ground;
+            LastHitDescription = "nothing";
 
             _path.Clear();
             if (recordPath)
@@ -149,6 +159,16 @@ namespace ProjectileLandingTracker.Tracking
             {
                 Vec3 next = position + current * StepSeconds;
                 next.z -= 0.5f * Gravity * StepSeconds * StepSeconds;
+
+                // Drag along the direction of flight, using the game's formula
+                // (managed_core_parameters.xml: speed -= air_friction_constant * speed^2 * dt).
+                if (limits.AirFriction > 0f)
+                {
+                    float speed = current.Length;
+                    float slowdown = 1f - limits.AirFriction * speed * StepSeconds;
+                    current *= slowdown > 0f ? slowdown : 0f;
+                }
+
                 current.z -= Gravity * StepSeconds;
 
                 // Right after launch, don't collide with the engine itself or the crew operating it.
@@ -161,7 +181,8 @@ namespace ProjectileLandingTracker.Tracking
                 }
 
                 bool sceneHit = mission.Scene.RayCastForClosestEntityOrTerrain(
-                    position, next, out float sceneDistance, out Vec3 scenePoint, RaycastThickness, BodyFlags.None);
+                    position, next, out float sceneDistance, out Vec3 scenePoint, out WeakGameEntity sceneEntity,
+                    RaycastThickness, MissileExcludedBodyFlags);
 
                 float segmentLength = (next - position).Length;
                 bool agentHit = TryHitAgent(position, next, segmentLength,
@@ -171,6 +192,7 @@ namespace ProjectileLandingTracker.Tracking
                 {
                     impact = agentPoint;
                     kind = agentIsEnemy ? HitKind.Enemy : HitKind.Friendly;
+                    LastHitDescription = agentIsEnemy ? "enemy agent" : "friendly agent";
                     if (recordPath) _path.Add(agentPoint);
                     return true;
                 }
@@ -178,10 +200,12 @@ namespace ProjectileLandingTracker.Tracking
                 if (sceneHit)
                 {
                     impact = scenePoint;
-                    kind = limits.IsSiege && TrackerConfig.MarkSiegeEngineHits
-                           && HitsOtherSiegeEngine(mission, position, next, scenePoint)
+                    // Any shot can hit a siege engine: a ballista bolt, or a stone thrown at a battering ram.
+                    kind = TrackerConfig.MarkSiegeEngineHits && HitsOtherSiegeEngine(sceneEntity)
                         ? HitKind.SiegeEngine
                         : HitKind.Ground;
+                    if (TrackerConfig.DebugHitInfo)
+                        LastHitDescription = Describe(sceneEntity);
                     if (recordPath) _path.Add(scenePoint);
                     return true;
                 }
@@ -193,56 +217,37 @@ namespace ProjectileLandingTracker.Tracking
             return false;
         }
 
-        private bool HitsOtherSiegeEngine(Mission mission, Vec3 from, Vec3 to, Vec3 landingPoint)
+        private bool HitsOtherSiegeEngine(WeakGameEntity entity)
         {
-            ResolveEntityRayCast(mission);
-
-            // The game can't tell us what was hit: fall back to "is the landing point near another engine?"
-            if (_rayCastEntity == null)
-                return _siege.IsNearOtherMachine(landingPoint);
+            // Terrain, or a body the engine can't name: not a siege engine.
+            if (!entity.IsValid)
+                return false;
 
             try
             {
-                if (_rayCastEntity(from, to, out float _, out Vec3 _, out GameEntity entity,
-                                   RaycastThickness, BodyFlags.None)
-                    && (object)entity != null)
-                {
-                    return _siege.IsOtherMachine(entity);
-                }
+                return _siege.IsOtherMachine(entity);
             }
             catch (Exception)
             {
                 // Treat an unexpected engine failure as "not a siege engine".
+                return false;
             }
-
-            return false;
         }
 
-        private void ResolveEntityRayCast(Mission mission)
+        private static string Describe(WeakGameEntity entity)
         {
-            if (_rayCastEntityResolved)
-                return;
-            _rayCastEntityResolved = true;
+            if (!entity.IsValid)
+                return "terrain";
 
             try
             {
-                MethodInfo method = mission.Scene.GetType().GetMethod(
-                    "RayCastForClosestEntityOrTerrain",
-                    new[]
-                    {
-                        typeof(Vec3), typeof(Vec3), typeof(float).MakeByRefType(), typeof(Vec3).MakeByRefType(),
-                        typeof(GameEntity).MakeByRefType(), typeof(float), typeof(BodyFlags)
-                    });
-
-                if (method != null)
-                {
-                    _rayCastEntity = (RayCastEntityDelegate)Delegate.CreateDelegate(
-                        typeof(RayCastEntityDelegate), mission.Scene, method);
-                }
+                string name = entity.Name;
+                return (string.IsNullOrEmpty(name) ? "(unnamed entity)" : name)
+                       + " [body " + entity.BodyFlag + " | phys " + entity.PhysicsDescBodyFlag + "]";
             }
             catch (Exception)
             {
-                _rayCastEntity = null;
+                return "(entity)";
             }
         }
 

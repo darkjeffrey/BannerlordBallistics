@@ -11,6 +11,10 @@ namespace ProjectileLandingTracker.Configuration
         public static bool Enabled => Settings?.Enabled ?? true;
         public static bool HideInMenus => Settings?.HideInMenus ?? true;
 
+        public static bool TrackBows => Settings?.TrackBows ?? true;
+        public static bool TrackCrossbows => Settings?.TrackCrossbows ?? true;
+        public static bool TrackThrownWeapons => Settings?.TrackThrownWeapons ?? true;
+
         public static bool ShowMarker => Settings?.ShowMarker ?? true;
         public static float MarkerRadius => Settings?.MarkerRadius ?? 0.25f;
         public static bool ShowTrace => Settings?.ShowTrace ?? false;
@@ -31,5 +35,7 @@ namespace ProjectileLandingTracker.Configuration
 
         public static bool TrackSiegeEngines => Settings?.TrackSiegeEngines ?? true;
         public static bool MarkSiegeEngineHits => Settings?.MarkSiegeEngineHits ?? true;
+
+        public static bool DebugHitInfo => Settings?.DebugHitInfo ?? false;
     }
 }

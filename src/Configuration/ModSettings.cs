@@ -26,85 +26,107 @@ namespace ProjectileLandingTracker.Configuration
         [SettingPropertyGroup("General", GroupOrder = 0)]
         public bool HideInMenus { get; set; } = true;
 
+        // ---------------- Weapons ----------------
+        [SettingPropertyBool("Track bows", Order = 0, RequireRestart = false,
+            HintText = "Show the landing prediction while a bow is wielded.")]
+        [SettingPropertyGroup("Weapons", GroupOrder = 1)]
+        public bool TrackBows { get; set; } = true;
+
+        [SettingPropertyBool("Track crossbows", Order = 1, RequireRestart = false,
+            HintText = "Show the landing prediction while a crossbow is wielded.")]
+        [SettingPropertyGroup("Weapons", GroupOrder = 1)]
+        public bool TrackCrossbows { get; set; } = true;
+
+        [SettingPropertyBool("Track throwing weapons", Order = 2, RequireRestart = false,
+            HintText = "Show the landing prediction for javelins, throwing axes, throwing knives and stones. Siege engines have their own switch under Siege engines.")]
+        [SettingPropertyGroup("Weapons", GroupOrder = 1)]
+        public bool TrackThrownWeapons { get; set; } = true;
+
+        // ---------------- Siege engines ----------------
+        [SettingPropertyBool("Track siege engines", Order = 0, RequireRestart = false,
+            HintText = "Show the landing prediction while you operate a ballista, catapult or trebuchet.")]
+        [SettingPropertyGroup("Siege engines", GroupOrder = 2)]
+        public bool TrackSiegeEngines { get; set; } = true;
+
+        [SettingPropertyBool("Highlight hits on siege engines", Order = 1, RequireRestart = false,
+            HintText = "When a shot would hit a siege engine (ballista, catapult, trebuchet, ram or siege tower), the marker and crosshair turn light blue. Works for siege engine shots and for bows, crossbows and thrown weapons, such as a stone thrown at a battering ram.")]
+        [SettingPropertyGroup("Siege engines", GroupOrder = 2)]
+        public bool MarkSiegeEngineHits { get; set; } = true;
+
         // ---------------- Landing marker ----------------
         [SettingPropertyBool("Show landing marker", Order = 0, RequireRestart = false,
             HintText = "Sphere drawn where the projectile is predicted to land.")]
-        [SettingPropertyGroup("Landing marker", GroupOrder = 1)]
+        [SettingPropertyGroup("Landing marker", GroupOrder = 3)]
         public bool ShowMarker { get; set; } = true;
 
         [SettingPropertyFloatingInteger("Marker size", 0.05f, 1f, "0.00", Order = 1, RequireRestart = false,
             HintText = "Radius of the landing marker, in metres.")]
-        [SettingPropertyGroup("Landing marker", GroupOrder = 1)]
+        [SettingPropertyGroup("Landing marker", GroupOrder = 3)]
         public float MarkerRadius { get; set; } = 0.25f;
 
         [SettingPropertyBool("Show projectile trace", Order = 2, RequireRestart = false,
             HintText = "Draw the predicted flight path as a line from you to the marker.")]
-        [SettingPropertyGroup("Landing marker", GroupOrder = 1)]
+        [SettingPropertyGroup("Landing marker", GroupOrder = 3)]
         public bool ShowTrace { get; set; } = false;
 
         // ---------------- Crosshair ----------------
         [SettingPropertyBool("Color the crosshair", Order = 0, RequireRestart = false,
             HintText = "Recolors the game's own crosshair to match the marker: white = ground, green = enemy, red = friendly, light blue = another siege engine (siege shots only).")]
-        [SettingPropertyGroup("Crosshair", GroupOrder = 2)]
+        [SettingPropertyGroup("Crosshair", GroupOrder = 4)]
         public bool ShowCrosshair { get; set; } = true;
 
         [SettingPropertyBool("Use ring if crosshair can't be recolored", Order = 1, RequireRestart = false,
             HintText = "If the game's crosshair can't be found or tinted, draw a colored ring around it instead.")]
-        [SettingPropertyGroup("Crosshair", GroupOrder = 2)]
+        [SettingPropertyGroup("Crosshair", GroupOrder = 4)]
         public bool FallbackRing { get; set; } = true;
 
         [SettingPropertyFloatingInteger("Ring size", 0.1f, 2f, "0.00", Order = 2, RequireRestart = false,
             HintText = "Size of the fallback ring.")]
-        [SettingPropertyGroup("Crosshair", GroupOrder = 2)]
+        [SettingPropertyGroup("Crosshair", GroupOrder = 4)]
         public float CrosshairRadius { get; set; } = 0.5f;
 
         [SettingPropertyFloatingInteger("Crosshair anchor distance", 5f, 60f, "0", Order = 3, RequireRestart = false,
             HintText = "How far in front of you the fallback ring and the crosshair distance text are drawn (metres).")]
-        [SettingPropertyGroup("Crosshair", GroupOrder = 2)]
+        [SettingPropertyGroup("Crosshair", GroupOrder = 4)]
         public float CrosshairDistance { get; set; } = 20f;
 
         // ---------------- Distance ----------------
         [SettingPropertyBool("Show distance", Order = 0, RequireRestart = false,
             HintText = "Master switch for the distance readout.")]
-        [SettingPropertyGroup("Distance", GroupOrder = 3)]
+        [SettingPropertyGroup("Distance", GroupOrder = 5)]
         public bool ShowDistance { get; set; } = true;
 
         [SettingPropertyBool("Distance next to landing marker", Order = 1, RequireRestart = false,
             HintText = "Show the distance beside the landing spot.")]
-        [SettingPropertyGroup("Distance", GroupOrder = 3)]
+        [SettingPropertyGroup("Distance", GroupOrder = 5)]
         public bool DistanceAtMarker { get; set; } = true;
 
         [SettingPropertyBool("Distance next to crosshair", Order = 2, RequireRestart = false,
             HintText = "Show the distance beside your crosshair.")]
-        [SettingPropertyGroup("Distance", GroupOrder = 3)]
+        [SettingPropertyGroup("Distance", GroupOrder = 5)]
         public bool DistanceAtCrosshair { get; set; } = false;
 
         // ---------------- Targeting ----------------
         [SettingPropertyBool("Stop at enemies", Order = 0, RequireRestart = false,
             HintText = "The prediction ends on the first enemy in the path (turns green).")]
-        [SettingPropertyGroup("Targeting", GroupOrder = 4)]
+        [SettingPropertyGroup("Targeting", GroupOrder = 6)]
         public bool StopAtEnemies { get; set; } = true;
 
         [SettingPropertyBool("Friendly fire warning", Order = 1, RequireRestart = false,
             HintText = "The prediction ends on the first ally in the path (turns red).")]
-        [SettingPropertyGroup("Targeting", GroupOrder = 4)]
+        [SettingPropertyGroup("Targeting", GroupOrder = 6)]
         public bool FriendlyFireWarning { get; set; } = true;
 
         // ---------------- Movement ----------------
         [SettingPropertyFloatingInteger("Forward momentum", 0f, 1f, "0.00", Order = 0, RequireRestart = false,
             HintText = "How much of your forward/backward speed is added to the projectile. 1 = full, 0 = none. (Sideways and vertical speed are never added, matching the game.)")]
-        [SettingPropertyGroup("Movement", GroupOrder = 5)]
+        [SettingPropertyGroup("Movement", GroupOrder = 7)]
         public float ForwardMomentum { get; set; } = 1f;
 
-        // ---------------- Siege engines ----------------
-        [SettingPropertyBool("Track siege engines", Order = 0, RequireRestart = false,
-            HintText = "Show the landing prediction while you operate a ballista, catapult or trebuchet.")]
-        [SettingPropertyGroup("Siege engines", GroupOrder = 6)]
-        public bool TrackSiegeEngines { get; set; } = true;
-
-        [SettingPropertyBool("Highlight hits on other siege engines", Order = 1, RequireRestart = false,
-            HintText = "When your siege engine's shot would hit another siege engine (ballista, catapult, trebuchet, ram or siege tower), the marker and crosshair turn light blue.")]
-        [SettingPropertyGroup("Siege engines", GroupOrder = 6)]
-        public bool MarkSiegeEngineHits { get; set; } = true;
+        // ---------------- Debug ----------------
+        [SettingPropertyBool("Show what stopped the shot", Order = 0, RequireRestart = false,
+            HintText = "Writes above the landing marker what the prediction hit: terrain, an agent, or the scene object's name and physics body flags. Use it to find objects the arrow should fly over.")]
+        [SettingPropertyGroup("Debug", GroupOrder = 8)]
+        public bool DebugHitInfo { get; set; } = false;
     }
 }
