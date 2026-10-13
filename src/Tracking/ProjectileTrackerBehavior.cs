@@ -73,7 +73,11 @@ namespace ProjectileLandingTracker.Tracking
         /// <summary>Draws the prediction. Returns false if there is nothing to predict for this weapon.</summary>
         private bool DrawPrediction(Agent player, float dt)
         {
-            if (!TryResolveShot(player, dt, out Vec3 origin, out Vec3 velocity, out bool isSiege))
+            if (TrackerConfig.TrackSiegeEngines || TrackerConfig.MarkSiegeEngineHits)
+                _siege.Refresh(Mission, dt);
+
+            if (!TryResolveShot(player, dt, out Vec3 origin, out Vec3 velocity, out bool isSiege,
+                                out float airFriction))
             {
                 _operatingSiegeEngine = false;
                 return false;
@@ -83,6 +87,7 @@ namespace ProjectileLandingTracker.Tracking
             TrajectorySimulator.ShotLimits limits = isSiege
                 ? TrajectorySimulator.ShotLimits.Siege
                 : TrajectorySimulator.ShotLimits.Handheld;
+            limits.AirFriction = airFriction;   // ShotLimits is a struct: this changes only the local copy
 
             _simulator.CollectTargets(Mission, player, origin, limits.TargetRange);
 
@@ -108,6 +113,10 @@ namespace ProjectileLandingTracker.Tracking
                 MBDebug.RenderDebugSphere(impact, TrackerConfig.MarkerRadius, packed, false, 0f);
 
             DrawDistance(impact, anchor, (impact - origin).Length, packed);
+
+            if (TrackerConfig.DebugHitInfo)
+                MBDebug.RenderDebugText3D(impact + new Vec3(0f, 0f, 1f), _simulator.LastHitDescription, packed, 0, 0, 0f);
+
             return true;
         }
 
@@ -164,17 +173,21 @@ namespace ProjectileLandingTracker.Tracking
         /// Works out where the projectile starts and how fast it goes: the siege engine the player is
         /// operating, otherwise the wielded ranged weapon. Returns false if there is nothing to predict.
         /// </summary>
-        private bool TryResolveShot(Agent player, float dt, out Vec3 origin, out Vec3 velocity, out bool isSiege)
+        private bool TryResolveShot(Agent player, float dt, out Vec3 origin, out Vec3 velocity, out bool isSiege,
+                                    out float airFriction)
         {
             origin = Vec3.Zero;
             velocity = Vec3.Zero;
             isSiege = false;
+            airFriction = 0f;
 
             if (TrackerConfig.TrackSiegeEngines
-                && _siege.TryGetShot(player, Mission, dt, out Vec3 siegeStart, out Vec3 siegeVelocity))
+                && _siege.TryGetShot(player, Mission, dt, out Vec3 siegeStart, out Vec3 siegeVelocity,
+                                     out float siegeFriction))
             {
                 origin = siegeStart;
                 velocity = siegeVelocity;
+                airFriction = siegeFriction;
                 isSiege = true;
                 return true;
             }
@@ -184,7 +197,7 @@ namespace ProjectileLandingTracker.Tracking
                 return false;
 
             WeaponComponentData usage = weapon.CurrentUsageItem;
-            if (usage == null || !usage.IsRangedWeapon)
+            if (usage == null || !usage.IsRangedWeapon || !WeaponGroups.IsTracked(usage))
                 return false;
 
             float speed = weapon.GetModifiedMissileSpeedForCurrentUsage();
