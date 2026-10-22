@@ -38,10 +38,16 @@
     <PackageReference Include="Bannerlord.MCM" Version="5.12.3" IncludeAssets="compile" PrivateAssets="all" />
   </ItemGroup>
 
-  <!-- Copy the SubModule.xml next to the built DLL's module folder. -->
+  <!-- Copy the SubModule.xml and ModuleData (translations) into the installed module folder. -->
   <Target Name="CopyModuleXml" AfterTargets="Build">
+    <ItemGroup>
+      <ModuleDataFiles Include="Module\ProjectileLandingTracker\ModuleData\**\*.*" />
+    </ItemGroup>
     <Copy SourceFiles="Module\ProjectileLandingTracker\SubModule.xml"
           DestinationFolder="$(GameFolder)\Modules\ProjectileLandingTracker\" />
+    <Copy SourceFiles="@(ModuleDataFiles)"
+          DestinationFiles="@(ModuleDataFiles->'$(GameFolder)\Modules\ProjectileLandingTracker\ModuleData\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

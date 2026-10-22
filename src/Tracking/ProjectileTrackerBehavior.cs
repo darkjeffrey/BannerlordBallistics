@@ -6,6 +6,7 @@ using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
 
 namespace ProjectileLandingTracker.Tracking
@@ -54,8 +55,10 @@ namespace ProjectileLandingTracker.Tracking
             if (Input.IsKeyPressed(ToggleKey))
             {
                 _sessionEnabled = !_sessionEnabled;
-                InformationManager.DisplayMessage(new InformationMessage(
-                    "Projectile Landing Tracker: " + (_sessionEnabled ? "ON" : "OFF")));
+                TextObject message = _sessionEnabled
+                    ? new TextObject("{=plt_toggle_on}Projectile Landing Tracker: ON")
+                    : new TextObject("{=plt_toggle_off}Projectile Landing Tracker: OFF");
+                InformationManager.DisplayMessage(new InformationMessage(message.ToString()));
             }
 
             Agent player = Agent.Main;
@@ -209,6 +212,7 @@ namespace ProjectileLandingTracker.Tracking
             Vec3 look = player.LookDirection.NormalizedCopy();
             origin = player.GetEyeGlobalPosition();
             velocity = look * speed + _motion.InheritedVelocity(look, TrackerConfig.ForwardMomentum);
+            airFriction = MissileDrag.ForHandheld(player, weapon, usage);
             return true;
         }
 

@@ -44,7 +44,7 @@ Requires the .NET SDK and a Bannerlord install.
    in `ProjectileLandingTracker.csproj`.
 2. Run `dotnet build -c Release`. The first build needs internet to fetch the MCM reference package.
 
-The build writes the DLL and `SubModule.xml` straight into
+The build writes the DLL, `SubModule.xml` and `ModuleData` (translations) straight into
 `<game>/Modules/ProjectileLandingTracker`. That folder's `bin/Win64_Shipping_Client` should contain only
 `ProjectileLandingTracker.dll`; delete any MCM or Harmony DLLs that appear.
 
@@ -52,6 +52,7 @@ The build writes the DLL and `SubModule.xml` straight into
 
 ```
 Module/ProjectileLandingTracker/SubModule.xml   Module manifest and dependencies
+Module/ProjectileLandingTracker/ModuleData/     English string table for translations
 src/SubModule.cs                                Entry point; attaches the tracker to missions
 src/Tracking/                                   Mission behavior, trajectory simulation, player motion
 src/Siege/                                      Siege engine discovery and launch parameters
@@ -66,10 +67,14 @@ instead of crashing the mission.
 
 ## Limitations
 
-- Prediction uses gravity only (no drag) and approximates units as cylinders, so it can differ slightly
-  from the game's own hit detection.
+- Prediction uses the game's gravity and air drag but approximates units as cylinders, so it can differ
+  slightly from the game's own hit detection.
 - Menu hiding is heuristic (it learns the normal number of UI layers); disable *Hide in menus* if the
   tracker vanishes during normal play.
+
+## Support
+
+If you enjoy the mod, you can support me on [Ko-fi](https://ko-fi.com/darkjeffrey).
 
 ## License
 

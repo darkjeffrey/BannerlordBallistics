@@ -9,7 +9,7 @@ using TaleWorlds.MountAndBlade;
 namespace ProjectileLandingTracker.Tracking
 {
     /// <summary>
-    /// Steps a projectile through gravity (no drag) until it hits an agent, the terrain or a scene object.
+    /// Steps a projectile through gravity and air drag until it hits an agent, the terrain or a scene object.
     /// Agents are approximated as vertical cylinders; the scene is queried with the engine's raycasts.
     /// </summary>
     internal sealed class TrajectorySimulator
@@ -62,7 +62,7 @@ namespace ProjectileLandingTracker.Tracking
         {
             /// <summary>
             /// Drag, as the game applies it: speed -= AirFriction * speed^2 * dt. 0 = no drag.
-            /// Set per shot (siege engines read it from their missile item).
+            /// Set per shot from the missile item (arrow, bolt, thrown weapon or siege projectile).
             /// </summary>
             public float AirFriction;
             public float MaxFlightSeconds;

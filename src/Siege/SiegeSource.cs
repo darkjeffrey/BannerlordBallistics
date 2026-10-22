@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using ProjectileLandingTracker.Interop;
+using ProjectileLandingTracker.Tracking;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
@@ -95,29 +96,12 @@ namespace ProjectileLandingTracker.Siege
             return true;
         }
 
-        /// <summary>
-        /// The drag constant the game uses for this engine's missile, read the same way vanilla aiming does
-        /// (RangedSiegeWeapon.GetTargetReleaseAngle): ItemObject.GetAirFrictionConstant(class, flags). The
-        /// values come from Native/ModuleData/managed_core_parameters.xml (0.001 for ballista bolts and
-        /// siege stones/boulders in v1.4.8). Prefers the loaded missile, falls back to the original one.
-        /// </summary>
+        /// <summary>Drag of the engine's missile: the loaded one, else the one it was built with.</summary>
         private static float ReadAirFriction(object weapon)
         {
-            try
-            {
-                ItemObject missile = ReflectionUtil.GetMember(weapon, "LoadedMissileItem") as ItemObject
-                                     ?? ReflectionUtil.GetMember(weapon, "OriginalMissileItem") as ItemObject;
-                WeaponComponentData data = missile?.PrimaryWeapon;
-                if (data == null)
-                    return 0f;
-
-                float friction = ItemObject.GetAirFrictionConstant(data.WeaponClass, data.WeaponFlags);
-                return friction > 0f && friction < 1f ? friction : 0f;
-            }
-            catch (Exception)
-            {
-                return 0f;
-            }
+            ItemObject missile = ReflectionUtil.GetMember(weapon, "LoadedMissileItem") as ItemObject
+                                 ?? ReflectionUtil.GetMember(weapon, "OriginalMissileItem") as ItemObject;
+            return MissileDrag.ForItem(missile);
         }
 
         /// <summary>

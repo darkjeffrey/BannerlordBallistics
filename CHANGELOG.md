@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- Fix: bows, crossbows and thrown weapons were predicted to land too far, by up to 15-20% on long
+  shots, because the prediction ignored air drag for hand-held weapons. It now uses the same drag the
+  game applies to the arrow, bolt or thrown weapon (thanks to Inviop for the report and analysis).
+- The mod's text (options page and the F9 message) can now be translated: the English string table is
+  in ModuleData/Languages/std_ProjectileLandingTracker.xml.
+
 ## 1.0.1
 
 - New "Weapons" options: turn the prediction on or off separately for bows, crossbows and throwing
