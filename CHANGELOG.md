@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Fix: hand-held shots now include the shooter's missile speed multiplier, as the game does, so the
+  predicted range matches when a skill, perk or setting changes it.
+- Gravity is now read from the game (MBGlobals.Gravity, 9.806 m/s²) instead of a hard-coded 9.8.
+- Units are now detected with the game's own agent raycast against their collision shapes, instead of
+  approximated cylinders, so shots that clip a shoulder or pass under a horse's belly are predicted
+  correctly.
+- Launch points: the prediction now starts where the game really spawns the missile. Hand-held weapons learn
+  the spawn point from your own shots (on foot and mounted separately); ballistae use the loaded bolt's
+  position; catapults and trebuchets learn their release point from real shots, per release angle. Before
+  the first shot, the old start point is used. Learned points are kept in memory only.
+- Siege shots now include the engine's own velocity, as the game does (zero for engines on land).
+- New "Show spread ring" option (Siege engines, on by default): a ring around the marker showing where the
+  game's random aiming error can put the shot (0.5 degrees for ballistae, 1 for trebuchets, 1.5 for
+  catapults, 2.5 for multi-shot fire loads).
+- "Show what stopped the shot" now also prints, after each of your shots, how far the real launch point and
+  speed were from the prediction.
+
 ## 1.0.2
 
 - Fix: bows, crossbows and thrown weapons were predicted to land too far, by up to 15-20% on long

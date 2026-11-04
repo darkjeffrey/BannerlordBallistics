@@ -35,6 +35,7 @@ namespace ProjectileLandingTracker.Configuration
 
         public static bool TrackSiegeEngines => Settings?.TrackSiegeEngines ?? true;
         public static bool MarkSiegeEngineHits => Settings?.MarkSiegeEngineHits ?? true;
+        public static bool ShowSpreadRing => Settings?.ShowSpreadRing ?? true;
 
         public static bool DebugHitInfo => Settings?.DebugHitInfo ?? false;
     }

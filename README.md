@@ -20,6 +20,12 @@ and thrown weapons, plus ballistae, catapults and trebuchets.
   Sideways momentum is not, because Bannerlord doesn't inherit it either.
 - **Siege engines**: works while you operate a ballista, catapult or trebuchet (fire variants included).
   Rams and siege towers count as "other siege engines" for the light-blue highlight.
+- **Real launch points**: after your first shot with a weapon, the prediction starts where the game actually
+  spawns your arrow, bolt or thrown weapon (separately on foot and mounted). Ballistae start from the loaded
+  bolt; catapults and trebuchets learn their release point from real shots, including the AI's. Nothing is
+  saved: it's re-learned each time you start the game.
+- **Spread ring** for siege engines (can be turned off): shows how far the game's random aiming error can scatter the
+  shot around the marker.
 - **Optional distance readout**, next to the marker and/or the crosshair.
 - Hides itself while a menu (Esc, inventory, ...) is open.
 - Every feature, and each weapon group (bows, crossbows, throwing weapons, siege engines), can be switched on or off in-game.
@@ -67,8 +73,8 @@ instead of crashing the mission.
 
 ## Limitations
 
-- Prediction uses the game's gravity and air drag but approximates units as cylinders, so it can differ
-  slightly from the game's own hit detection.
+- Prediction uses the game's gravity, air drag and unit collision, but steps the flight in small time
+  slices, so it can differ by a few centimetres from where the real projectile lands.
 - Menu hiding is heuristic (it learns the normal number of UI layers); disable *Hide in menus* if the
   tracker vanishes during normal play.
 

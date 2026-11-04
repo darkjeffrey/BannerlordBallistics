@@ -1,3 +1,4 @@
+using System;
 using ProjectileLandingTracker.Configuration;
 using ProjectileLandingTracker.Interop;
 using ProjectileLandingTracker.Rendering;
@@ -12,25 +13,31 @@ using TaleWorlds.MountAndBlade;
 namespace ProjectileLandingTracker.Tracking
 {
     /// <summary>
-    /// Predicts where the player's wielded ranged weapon (or siege engine) will land and draws it.
-    /// <list type="bullet">
-    /// <item>The prediction stops at the first agent in the path: enemy = green, friendly = red.
-    /// Terrain and objects are white; another siege engine is light blue.</item>
-    /// <item>The landing marker and the game's crosshair use that color.</item>
-    /// <item>Forward/backward player movement is added to the projectile's velocity; sideways movement is
-    /// not, matching the game.</item>
-    /// </list>
-    /// F9 toggles the tracker for the current mission; everything else is in the MCM options.
+    /// Predicts where the player's ranged weapon or siege engine will land and draws it. The prediction stops
+    /// at the first unit in the path (enemy green, friendly red); terrain and objects are white, another
+    /// siege engine light blue. F9 toggles it for the current mission.
     /// </summary>
     public class ProjectileTrackerBehavior : MissionBehavior
     {
         private const InputKey ToggleKey = InputKey.F9;
-        private const int MaxTraceSegments = 100;   // long (siege) flights are drawn with fewer, longer lines
+        private const int MaxTraceSegments = 100;
+        private const int SpreadRingPoints = 12;
+        private const float SpreadRingRefreshSeconds = 0.1f;
+        private const float SpreadRingLift = 0.05f;
 
         private static readonly Color GroundColor = new Color(1f, 1f, 1f);
         private static readonly Color EnemyColor = new Color(0f, 1f, 0f);
         private static readonly Color FriendlyColor = new Color(1f, 0f, 0f);
         private static readonly Color SiegeEngineColor = new Color(0f, 0.8f, 1f);
+
+        private struct Shot
+        {
+            public Vec3 Origin;
+            public Vec3 Velocity;
+            public float AirFriction;
+            public bool IsSiege;
+            public SiegeShot Siege;
+        }
 
         private readonly PlayerMotion _motion = new PlayerMotion();
         private readonly MenuDetector _menus = new MenuDetector();
@@ -38,8 +45,13 @@ namespace ProjectileLandingTracker.Tracking
         private readonly SiegeSource _siege = new SiegeSource();
         private readonly TrajectorySimulator _simulator;
 
+        private readonly Vec3[] _ringPoints = new Vec3[SpreadRingPoints];
+        private readonly bool[] _ringHit = new bool[SpreadRingPoints];
+        private float _ringTimer;
+
         private bool _sessionEnabled = true;
         private bool _operatingSiegeEngine;
+        private Shot? _lastHandheldShot;
 
         public ProjectileTrackerBehavior()
         {
@@ -65,7 +77,6 @@ namespace ProjectileLandingTracker.Tracking
             _motion.Update(player, dt);
 
             bool menuOpen = TrackerConfig.HideInMenus && _menus.IsMenuOpen(_operatingSiegeEngine);
-
             bool active = _sessionEnabled && TrackerConfig.Enabled && Mission != null
                           && !menuOpen && player != null && player.IsActive();
 
@@ -73,53 +84,142 @@ namespace ProjectileLandingTracker.Tracking
                 _tinter.Restore();
         }
 
-        /// <summary>Draws the prediction. Returns false if there is nothing to predict for this weapon.</summary>
+        /// <summary>
+        /// The game reports every missile it launches; the player's hand-held shots teach where missiles
+        /// really spawn relative to the eye and aim.
+        /// </summary>
+        public override void OnAgentShootMissile(Agent shooterAgent, EquipmentIndex weaponIndex, Vec3 position,
+                                                 Vec3 velocity, Mat3 orientation, bool hasRigidBody, int forcedMissileIndex)
+        {
+            base.OnAgentShootMissile(shooterAgent, weaponIndex, position, velocity, orientation, hasRigidBody,
+                forcedMissileIndex);
+
+            if (shooterAgent == null || shooterAgent != Agent.Main
+                || weaponIndex < EquipmentIndex.WeaponItemBeginSlot || weaponIndex >= EquipmentIndex.NumAllWeaponSlots)
+                return;
+
+            try
+            {
+                WeaponComponentData usage = shooterAgent.Equipment[weaponIndex].CurrentUsageItem;
+                if (usage == null)
+                    return;
+
+                Vec3 look = shooterAgent.LookDirection;
+                Basis aim = Basis.FromLook(shooterAgent.GetEyeGlobalPosition(), look);
+                LaunchPointMemory.AddHandheld(LaunchPointMemory.HandheldKey(usage.WeaponClass, shooterAgent.HasMount),
+                    aim.ToLocal(position));
+
+                if (TrackerConfig.DebugHitInfo && _lastHandheldShot is Shot predicted)
+                    ShowShotComparison(predicted, position, velocity, look);
+            }
+            catch (Exception)
+            {
+                // learning is best-effort; never disturb the shot
+            }
+        }
+
         private bool DrawPrediction(Agent player, float dt)
         {
             if (TrackerConfig.TrackSiegeEngines || TrackerConfig.MarkSiegeEngineHits)
                 _siege.Refresh(Mission, dt);
 
-            if (!TryResolveShot(player, dt, out Vec3 origin, out Vec3 velocity, out bool isSiege,
-                                out float airFriction))
+            if (!TryResolveShot(player, out Shot shot))
             {
                 _operatingSiegeEngine = false;
+                _ringTimer = 0f;
                 return false;
             }
-            _operatingSiegeEngine = isSiege;
+            _operatingSiegeEngine = shot.IsSiege;
 
-            TrajectorySimulator.ShotLimits limits = isSiege
+            TrajectorySimulator.ShotLimits limits = shot.IsSiege
                 ? TrajectorySimulator.ShotLimits.Siege
                 : TrajectorySimulator.ShotLimits.Handheld;
-            limits.AirFriction = airFriction;   // ShotLimits is a struct: this changes only the local copy
+            limits.AirFriction = shot.AirFriction;
 
-            _simulator.CollectTargets(Mission, player, origin, limits.TargetRange);
-
-            bool wantTrace = TrackerConfig.ShowTrace;
-            bool landed = _simulator.Simulate(Mission, origin, velocity, limits, wantTrace,
+            _simulator.SetShooter(player);
+            bool landed = _simulator.Simulate(Mission, shot.Origin, shot.Velocity, limits, TrackerConfig.ShowTrace,
                 out Vec3 impact, out HitKind kind);
 
             Color color = ColorFor(landed ? kind : HitKind.Ground);
             uint packed = color.ToUnsignedInteger();
-
-            Vec3 eye = player.GetEyeGlobalPosition();
-            Vec3 anchor = eye + player.LookDirection.NormalizedCopy() * TrackerConfig.CrosshairDistance;
+            Vec3 anchor = player.GetEyeGlobalPosition() + player.LookDirection.NormalizedCopy() * TrackerConfig.CrosshairDistance;
 
             DrawCrosshair(color, packed, anchor, dt);
-
-            if (wantTrace)
+            if (TrackerConfig.ShowTrace)
                 DrawTrace(packed);
+
+            if (shot.IsSiege && landed && TrackerConfig.ShowSpreadRing && shot.Siege.MaxErrorDegrees > 0f)
+                DrawSpreadRing(shot.Siege, limits, packed, dt);
+            else
+                _ringTimer = 0f;
 
             if (!landed)
                 return true;
 
             if (TrackerConfig.ShowMarker)
                 MBDebug.RenderDebugSphere(impact, TrackerConfig.MarkerRadius, packed, false, 0f);
-
-            DrawDistance(impact, anchor, (impact - origin).Length, packed);
-
+            DrawDistance(impact, anchor, (impact - shot.Origin).Length, packed);
             if (TrackerConfig.DebugHitInfo)
                 MBDebug.RenderDebugText3D(impact + new Vec3(0f, 0f, 1f), _simulator.LastHitDescription, packed, 0, 0, 0f);
 
+            return true;
+        }
+
+        /// <summary>The siege engine the player operates, otherwise the wielded ranged weapon.</summary>
+        private bool TryResolveShot(Agent player, out Shot shot)
+        {
+            _lastHandheldShot = null;
+
+            if (TrackerConfig.TrackSiegeEngines && _siege.TryGetShot(player, out SiegeShot siege))
+            {
+                shot = new Shot
+                {
+                    Origin = siege.Start,
+                    Velocity = siege.Velocity,
+                    AirFriction = siege.AirFriction,
+                    IsSiege = true,
+                    Siege = siege
+                };
+                return true;
+            }
+
+            if (!TryResolveHandheld(player, out shot))
+                return false;
+
+            _lastHandheldShot = shot;
+            return true;
+        }
+
+        private bool TryResolveHandheld(Agent player, out Shot shot)
+        {
+            shot = default;
+
+            MissionWeapon weapon = player.WieldedWeapon;
+            WeaponComponentData usage = weapon.IsEmpty ? null : weapon.CurrentUsageItem;
+            if (usage == null || !usage.IsRangedWeapon || !WeaponGroups.IsTracked(usage))
+                return false;
+
+            float speed = weapon.GetModifiedMissileSpeedForCurrentUsage();
+            if (speed <= 0f)
+                speed = usage.MissileSpeed;
+            if (speed <= 0f)
+                return false;
+
+            float multiplier = player.AgentDrivenProperties?.MissileSpeedMultiplier ?? 1f;
+            if (multiplier > 0.01f)
+                speed *= multiplier;
+
+            Vec3 look = player.LookDirection.NormalizedCopy();
+            Vec3 eye = player.GetEyeGlobalPosition();
+            bool learned = LaunchPointMemory.TryGetHandheld(
+                LaunchPointMemory.HandheldKey(usage.WeaponClass, player.HasMount), out Vec3 spawn);
+
+            shot = new Shot
+            {
+                Origin = learned ? Basis.FromLook(eye, look).ToWorld(spawn) : eye,
+                Velocity = look * speed + _motion.InheritedVelocity(look, TrackerConfig.ForwardMomentum),
+                AirFriction = MissileDrag.ForHandheld(player, weapon, usage)
+            };
             return true;
         }
 
@@ -142,19 +242,37 @@ namespace ProjectileLandingTracker.Tracking
             if (path.Count < 2)
                 return;
 
-            // A siege shot can take hundreds of simulation steps; draw at most MaxTraceSegments lines.
-            int stride = System.Math.Max(1, (path.Count - 1 + MaxTraceSegments - 1) / MaxTraceSegments);
-
-            Vec3 previous = path[0];
-            for (int i = stride; ; i += stride)
+            int last = path.Count - 1;
+            int stride = Math.Max(1, (last + MaxTraceSegments - 1) / MaxTraceSegments);
+            for (int i = 0; i < last; i += stride)
             {
-                int index = i < path.Count ? i : path.Count - 1;
-                Vec3 current = path[index];
-                MBDebug.RenderDebugLine(previous, current - previous, packed, false, 0f);
-                previous = current;
+                int next = Math.Min(i + stride, last);
+                MBDebug.RenderDebugLine(path[i], path[next] - path[i], packed, false, 0f);
+            }
+        }
 
-                if (index == path.Count - 1)
-                    break;
+        /// <summary>Where shots along the edge of the game's random error cone land.</summary>
+        private void DrawSpreadRing(SiegeShot shot, TrajectorySimulator.ShotLimits limits, uint packed, float dt)
+        {
+            _ringTimer -= dt;
+            if (_ringTimer <= 0f)
+            {
+                _ringTimer = SpreadRingRefreshSeconds;
+                float tilt = shot.MaxErrorDegrees * MathF.PI / 180f;
+                for (int i = 0; i < SpreadRingPoints; i++)
+                {
+                    Vec3 direction = Basis.ConeEdge(shot.Direction, tilt, i * 2f * MathF.PI / SpreadRingPoints);
+                    Vec3 velocity = direction * shot.Speed + shot.CarrierVelocity;
+                    _ringHit[i] = _simulator.FindGroundImpact(Mission, shot.Start, velocity, limits, out _ringPoints[i]);
+                }
+            }
+
+            Vec3 lift = new Vec3(0f, 0f, SpreadRingLift);
+            for (int i = 0; i < SpreadRingPoints; i++)
+            {
+                int next = (i + 1) % SpreadRingPoints;
+                if (_ringHit[i] && _ringHit[next])
+                    MBDebug.RenderDebugLine(_ringPoints[i] + lift, _ringPoints[next] - _ringPoints[i], packed, false, 0f);
             }
         }
 
@@ -164,56 +282,21 @@ namespace ProjectileLandingTracker.Tracking
                 return;
 
             string text = distance.ToString("0") + "m";
-
             if (TrackerConfig.DistanceAtMarker)
                 MBDebug.RenderDebugText3D(impact + new Vec3(0f, 0f, 0.5f), text, packed, 0, 0, 0f);
-
             if (TrackerConfig.DistanceAtCrosshair)
                 MBDebug.RenderDebugText3D(anchor, text, packed, 40, 0, 0f);
         }
 
-        /// <summary>
-        /// Works out where the projectile starts and how fast it goes: the siege engine the player is
-        /// operating, otherwise the wielded ranged weapon. Returns false if there is nothing to predict.
-        /// </summary>
-        private bool TryResolveShot(Agent player, float dt, out Vec3 origin, out Vec3 velocity, out bool isSiege,
-                                    out float airFriction)
+        private static void ShowShotComparison(Shot predicted, Vec3 position, Vec3 velocity, Vec3 look)
         {
-            origin = Vec3.Zero;
-            velocity = Vec3.Zero;
-            isSiege = false;
-            airFriction = 0f;
-
-            if (TrackerConfig.TrackSiegeEngines
-                && _siege.TryGetShot(player, Mission, dt, out Vec3 siegeStart, out Vec3 siegeVelocity,
-                                     out float siegeFriction))
-            {
-                origin = siegeStart;
-                velocity = siegeVelocity;
-                airFriction = siegeFriction;
-                isSiege = true;
-                return true;
-            }
-
-            MissionWeapon weapon = player.WieldedWeapon;
-            if (weapon.IsEmpty)
-                return false;
-
-            WeaponComponentData usage = weapon.CurrentUsageItem;
-            if (usage == null || !usage.IsRangedWeapon || !WeaponGroups.IsTracked(usage))
-                return false;
-
-            float speed = weapon.GetModifiedMissileSpeedForCurrentUsage();
-            if (speed <= 0f)
-                speed = usage.MissileSpeed;
-            if (speed <= 0f)
-                return false;
-
-            Vec3 look = player.LookDirection.NormalizedCopy();
-            origin = player.GetEyeGlobalPosition();
-            velocity = look * speed + _motion.InheritedVelocity(look, TrackerConfig.ForwardMomentum);
-            airFriction = MissileDrag.ForHandheld(player, weapon, usage);
-            return true;
+            float startCm = (position - predicted.Origin).Length * 100f;
+            float cosine = Vec3.DotProduct(velocity.NormalizedCopy(), look.NormalizedCopy());
+            float aimDegrees = MathF.Acos(MathF.Clamp(cosine, -1f, 1f)) * 180f / MathF.PI;
+            InformationManager.DisplayMessage(new InformationMessage(
+                "[Landing Tracker] start " + startCm.ToString("0") + " cm from prediction, direction "
+                + aimDegrees.ToString("0.00") + " deg off aim, speed " + velocity.Length.ToString("0.0")
+                + " m/s (predicted " + predicted.Velocity.Length.ToString("0.0") + ")"));
         }
 
         private static Color ColorFor(HitKind kind)

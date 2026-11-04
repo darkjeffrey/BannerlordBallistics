@@ -75,6 +75,11 @@ namespace ProjectileLandingTracker.Configuration
         [SettingPropertyGroup(SiegeEngines, GroupOrder = 2)]
         public bool MarkSiegeEngineHits { get; set; } = true;
 
+        [SettingPropertyBool("{=plt_mcm_ShowSpreadRing}Show spread ring", Order = 2, RequireRestart = false,
+            HintText = "{=plt_mcm_ShowSpreadRing_hint}Draws a ring around the landing marker showing how far the game's random aiming error can scatter a siege shot. The shot can land anywhere inside the ring; the marker is its centre.")]
+        [SettingPropertyGroup(SiegeEngines, GroupOrder = 2)]
+        public bool ShowSpreadRing { get; set; } = true;
+
         // ---------------- Landing marker ----------------
         private const string LandingMarker = "{=plt_mcm_group_landing_marker}Landing marker";
 

@@ -1,6 +1,6 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using ProjectileLandingTracker.Configuration;
 using ProjectileLandingTracker.Interop;
 using ProjectileLandingTracker.Tracking;
 using TaleWorlds.Core;
@@ -10,199 +10,214 @@ using TaleWorlds.MountAndBlade;
 
 namespace ProjectileLandingTracker.Siege
 {
+    /// <summary>A siege shot as the game will fire it, before its random aiming error.</summary>
+    internal struct SiegeShot
+    {
+        public Vec3 Start;
+        public Vec3 Direction;
+        public float Speed;
+        public Vec3 CarrierVelocity;
+        public float AirFriction;
+        public float MaxErrorDegrees;
+
+        public Vec3 Velocity => Direction * Speed + CarrierVelocity;
+    }
+
     /// <summary>
-    /// Finds the siege engine (ballista, catapult, trebuchet, fire variants) the player operates and reads
-    /// where its projectile leaves from and how fast. It also knows every siege engine in the scene, so a
-    /// shot that would hit another one can be recognised.
+    /// Reads how the siege engine the player operates will fire, and knows every siege engine in the scene so
+    /// a shot that would hit another one can be recognised.
     /// <para>
-    /// Everything is read by member name through reflection: a renamed or missing member means "no
-    /// prediction" rather than a build error or crash.
+    /// The game launches from wherever the projectile is at release. A ballista's bolt sits still until then;
+    /// a catapult's or trebuchet's stone swings with the arm, so its release point is learned from real shots
+    /// (<see cref="RecordRelease"/>) and estimated from the engine's simulation marker until the first one.
+    /// Protected members are read through reflection, so a renamed one means "no prediction", not a crash.
     /// </para>
     /// </summary>
     internal sealed class SiegeSource
     {
         private const float RescanIntervalSeconds = 3f;
         private const int MaxParentDepth = 16;
-        private readonly List<object> _rangedWeapons = new List<object>();
-        private readonly HashSet<string> _machineKeys = new HashSet<string>();
-        private string _ownKey;
+        // RangedSiegeWeapon.SetupProjectileToShoot uses this error for multi-shot loads (fire pots).
+        private const float MultipleProjectileErrorDegrees = 2.5f;
+
+        private static RangedSiegeWeapon _lastPredictedWeapon;
+        private static Vec3 _lastPredictedStart;
+
+        private readonly List<RangedSiegeWeapon> _rangedWeapons = new List<RangedSiegeWeapon>();
+        private readonly HashSet<UIntPtr> _machines = new HashSet<UIntPtr>();
+        private UIntPtr _ownMachine;
         private float _rescanTimer;
 
         /// <summary>
-        /// Keeps the list of siege engines in the scene up to date. Call every tick, whatever the player is
-        /// holding: hand-held shots (a thrown stone at a battering ram) need the list too, and engines can be
-        /// destroyed or spawned during the battle.
+        /// Call every tick, whatever the player holds: hand-held shots need the engine list too, and engines
+        /// are destroyed or spawned during battle.
         /// </summary>
         public void Refresh(Mission mission, float dt)
         {
-            if (mission == null)
-                return;
-
             _rescanTimer -= dt;
-            if (_rescanTimer > 0f)
+            if (mission == null || _rescanTimer > 0f)
                 return;
 
-            ScanMissionObjects(mission);
             _rescanTimer = RescanIntervalSeconds;
+            _rangedWeapons.Clear();
+            _machines.Clear();
+
+            foreach (MissionObject missionObject in mission.MissionObjects)
+            {
+                if (missionObject is RangedSiegeWeapon ranged)
+                    _rangedWeapons.Add(ranged);
+                // Not the SiegeWeapon base class: that would also count siege ladders.
+                if (missionObject is RangedSiegeWeapon || missionObject is BatteringRam || missionObject is SiegeTower)
+                    _machines.Add(missionObject.GameEntity.Pointer);
+            }
         }
 
-        /// <summary>
-        /// If the player is operating a ranged siege engine, returns where its projectile starts, its
-        /// launch velocity and its air friction constant (0 if it can't be read).
-        /// </summary>
-        public bool TryGetShot(Agent player, Mission mission, float dt, out Vec3 start, out Vec3 velocity,
-                               out float airFriction)
+        public bool TryGetShot(Agent player, out SiegeShot shot)
         {
-            start = Vec3.Zero;
-            velocity = Vec3.Zero;
-            airFriction = 0f;
-            _ownKey = null;   // not operating an engine: every engine counts as "another" one
+            shot = default;
+            _ownMachine = UIntPtr.Zero;
+            _lastPredictedWeapon = null;
 
-            if (player == null || mission == null)
-                return false;
-
-            // Cheap early-out: a player who isn't using any object isn't on a siege engine.
-            if (ReflectionUtil.GetMember(player, "CurrentlyUsedGameObject") == null)
-                return false;
-
-            object weapon = FindWeaponOperatedBy(player);
+            RangedSiegeWeapon weapon = player?.CurrentlyUsedGameObject == null ? null : FindWeaponOperatedBy(player);
             if (weapon == null)
                 return false;
 
-            _ownKey = KeyOf(ReflectionUtil.GetMember(weapon, "GameEntity"));
+            _ownMachine = weapon.GameEntity.Pointer;
 
-            object startValue = ReflectionUtil.GetMember(weapon, "MissileStartingGlobalPositionForSimulation");
-            if (!(startValue is Vec3))
-            {
-                object startEntity = ReflectionUtil.GetMember(weapon, "MissileStartingPositionEntityForSimulation");
-                startValue = ReflectionUtil.GetMember(startEntity, "GlobalPosition");
-            }
-
-            object directionValue = ReflectionUtil.GetMember(weapon, "ShootingDirection");
-            if (!(startValue is Vec3) || !(directionValue is Vec3))
+            if (!(ReflectionUtil.GetMember(weapon, "ShootingDirection") is Vec3 direction)
+                || direction.LengthSquared < 0.0001f)
                 return false;
 
             float speed = ReadFloat(weapon, "ShootingSpeed");
             if (speed <= 0f)
                 speed = ReadFloat(weapon, "ProjectileSpeed");
-
-            Vec3 direction = (Vec3)directionValue;
-            if (speed <= 0f || direction.LengthSquared < 0.0001f)
+            if (speed <= 0f || !TryGetStart(weapon, out Vec3 start))
                 return false;
 
-            start = (Vec3)startValue;
-            velocity = direction.NormalizedCopy() * speed;
-            airFriction = ReadAirFriction(weapon);
+            shot = new SiegeShot
+            {
+                Start = start,
+                Direction = direction.NormalizedCopy(),
+                Speed = speed,
+                CarrierVelocity = weapon.GetGlobalVelocity(),
+                AirFriction = MissileDrag.ForItem(LoadedOrOriginalMissile(weapon)),
+                MaxErrorDegrees = ReadMaxError(weapon)
+            };
+
+            _lastPredictedWeapon = weapon;
+            _lastPredictedStart = start;
             return true;
         }
 
-        /// <summary>Drag of the engine's missile: the loaded one, else the one it was built with.</summary>
-        private static float ReadAirFriction(object weapon)
+        /// <summary>Called as the game fires a siege shot (any shooter, AI included).</summary>
+        public static void RecordRelease(RangedSiegeWeapon weapon)
         {
-            ItemObject missile = ReflectionUtil.GetMember(weapon, "LoadedMissileItem") as ItemObject
-                                 ?? ReflectionUtil.GetMember(weapon, "OriginalMissileItem") as ItemObject;
-            return MissileDrag.ForItem(missile);
+            if (weapon == null || !TryGetProjectilePosition(weapon, out Vec3 released))
+                return;
+
+            if (!(weapon is Ballista))
+                LaunchPointMemory.AddSiege(EngineKey(weapon), ReleaseAngle(weapon), EngineBasis(weapon).ToLocal(released));
+
+            if (TrackerConfig.DebugHitInfo && weapon == _lastPredictedWeapon && weapon.PilotAgent == Agent.Main)
+            {
+                float offset = (released - _lastPredictedStart).Length;
+                InformationManager.DisplayMessage(new InformationMessage(
+                    "[Landing Tracker] siege release " + offset.ToString("0.00") + " m from predicted start"));
+                _lastPredictedWeapon = null;   // multi-shot loads release several missiles at once
+            }
         }
 
-        /// <summary>
-        /// True if the given entity is (part of) a siege engine other than the one the player operates.
-        /// Walks up the entity's parents, because an engine's parts are child entities.
-        /// </summary>
+        /// <summary>True if the entity is part of a siege engine other than the one the player operates.</summary>
         public bool IsOtherMachine(WeakGameEntity entity)
         {
-            if (_machineKeys.Count == 0)
+            if (_machines.Count == 0)
                 return false;
 
-            WeakGameEntity current = entity;
-            for (int depth = 0; current.IsValid && depth < MaxParentDepth; depth++)
+            // An engine's parts are child entities of the engine.
+            for (int depth = 0; entity.IsValid && depth < MaxParentDepth; depth++, entity = entity.Parent)
             {
-                string key = KeyOf(current);
-                if (key != null)
-                {
-                    if (key == _ownKey)
-                        return false;
-                    if (_machineKeys.Contains(key))
-                        return true;
-                }
-
-                current = current.Parent;
+                UIntPtr pointer = entity.Pointer;
+                if (pointer == _ownMachine)
+                    return false;
+                if (_machines.Contains(pointer))
+                    return true;
             }
-
             return false;
         }
 
-        private object FindWeaponOperatedBy(Agent player)
+        private RangedSiegeWeapon FindWeaponOperatedBy(Agent player)
         {
-            foreach (object weapon in _rangedWeapons)
+            foreach (RangedSiegeWeapon weapon in _rangedWeapons)
             {
-                if (ReferenceEquals(ReflectionUtil.GetMember(weapon, "PilotAgent"), player))
+                if (weapon.PilotAgent == player)
                     return weapon;
             }
             return null;
         }
 
-        private void ScanMissionObjects(Mission mission)
+        private static bool TryGetStart(RangedSiegeWeapon weapon, out Vec3 start)
         {
-            _rangedWeapons.Clear();
-            _machineKeys.Clear();
+            if (weapon is Ballista && TryGetProjectilePosition(weapon, out start))
+                return true;
 
-            IEnumerable objects = ReflectionUtil.GetMember(mission, "MissionObjects") as IEnumerable
-                                  ?? ReflectionUtil.GetMember(mission, "ActiveMissionObjects") as IEnumerable;
-            if (objects == null)
-                return;
-
-            foreach (object missionObject in objects)
+            if (LaunchPointMemory.TryGetSiege(EngineKey(weapon), ReleaseAngle(weapon), out Vec3 local))
             {
-                if (missionObject == null)
-                    continue;
+                start = EngineBasis(weapon).ToWorld(local);
+                return true;
+            }
 
-                Type type = missionObject.GetType();
-                bool isRanged = ReflectionUtil.InheritsFromName(type, "RangedSiegeWeapon");
-                bool isRam = ReflectionUtil.InheritsFromName(type, "BatteringRam");
-                bool isTower = ReflectionUtil.InheritsFromName(type, "SiegeTower");
-                // Not the SiegeWeapon base class: that would also count siege ladders.
+            object marker = ReflectionUtil.GetMember(weapon, "MissileStartingGlobalPositionForSimulation")
+                            ?? (ReflectionUtil.GetMember(weapon, "MissileStartingPositionEntityForSimulation") as GameEntity)?.GlobalPosition;
+            if (marker is Vec3 markerPosition && markerPosition.LengthSquared > 0f)
+            {
+                start = markerPosition;
+                return true;
+            }
 
-                if (isRanged)
-                    _rangedWeapons.Add(missionObject);
+            return TryGetProjectilePosition(weapon, out start);
+        }
 
-                if (!(isRanged || isRam || isTower))
-                    continue;
-
-                string key = KeyOf(ReflectionUtil.GetMember(missionObject, "GameEntity"));
-                if (key != null)
-                    _machineKeys.Add(key);
+        private static bool TryGetProjectilePosition(RangedSiegeWeapon weapon, out Vec3 position)
+        {
+            try
+            {
+                position = weapon.ProjectileEntityCurrentGlobalPosition;
+                return position.IsValid && position.LengthSquared > 0f;
+            }
+            catch (Exception)
+            {
+                // no projectile entity while reloading or once destroyed
+                position = Vec3.Zero;
+                return false;
             }
         }
 
-        /// <summary>
-        /// A stable identity for a game entity. Two managed wrappers around the same native entity are
-        /// different objects, so compare by native pointer when readable, otherwise by name. Works for both
-        /// WeakGameEntity (what MissionObject.GameEntity and the raycast return in v1.4.8) and GameEntity.
-        /// </summary>
-        private static string KeyOf(WeakGameEntity entity)
+        // The part that turns to aim; the release point turns with it.
+        private static Basis EngineBasis(RangedSiegeWeapon weapon)
         {
+            WeakGameEntity entity = (ReflectionUtil.GetMember(weapon, "RotationObject") as MissionObject)?.GameEntity
+                                    ?? WeakGameEntity.Invalid;
             if (!entity.IsValid)
-                return null;
-            UIntPtr pointer = entity.Pointer;
-            return pointer == UIntPtr.Zero ? null : "p" + pointer.ToUInt64();
+                entity = weapon.GameEntity;
+            return Basis.FromFrame(entity.GetGlobalFrame());
         }
 
-        private static string KeyOf(object entity)
+        private static float ReleaseAngle(RangedSiegeWeapon weapon) => ReadFloat(weapon, "CurrentReleaseAngle");
+
+        private static string EngineKey(RangedSiegeWeapon weapon) => weapon.GetType().FullName;
+
+        private static float ReadMaxError(RangedSiegeWeapon weapon)
         {
-            if (entity == null)
-                return null;
-            if (entity is WeakGameEntity weak)
-                return KeyOf(weak);
+            string loaded = (ReflectionUtil.GetMember(weapon, "LoadedMissileItem") as ItemObject)?.StringId;
+            return loaded != null && (loaded == weapon.MultipleProjectileId || loaded == weapon.MultipleFireProjectileId)
+                ? MultipleProjectileErrorDegrees
+                : ReadFloat(weapon, "MaximumBallisticError");
+        }
 
-            object pointer = ReflectionUtil.GetMember(entity, "Pointer")
-                             ?? ReflectionUtil.GetMember(entity, "_pointer");
-            if (pointer is UIntPtr unsignedPointer)
-                return "p" + unsignedPointer.ToUInt64();
-            if (pointer is IntPtr signedPointer)
-                return "p" + signedPointer.ToInt64();
-
-            string name = ReflectionUtil.GetMember(entity, "Name") as string;
-            return string.IsNullOrEmpty(name) ? null : "n:" + name;
+        private static ItemObject LoadedOrOriginalMissile(RangedSiegeWeapon weapon)
+        {
+            return ReflectionUtil.GetMember(weapon, "LoadedMissileItem") as ItemObject
+                   ?? ReflectionUtil.GetMember(weapon, "OriginalMissileItem") as ItemObject;
         }
 
         private static float ReadFloat(object instance, string member)

@@ -44,11 +44,9 @@ namespace ProjectileLandingTracker.Tracking
         }
 
         /// <summary>
-        /// The velocity a projectile fired along <paramref name="look"/> inherits. Bannerlord only passes on
-        /// the forward/backward component, so sideways and vertical movement are ignored.
+        /// The velocity a projectile fired along <paramref name="look"/> inherits: like the game, only the
+        /// horizontal forward/backward part, scaled by <paramref name="forwardFactor"/>.
         /// </summary>
-        /// <param name="look">The (normalized) look direction.</param>
-        /// <param name="forwardFactor">Fraction of the forward speed to inherit (0 to 1).</param>
         public Vec3 InheritedVelocity(Vec3 look, float forwardFactor)
         {
             float horizontalLength = (float)Math.Sqrt(look.x * look.x + look.y * look.y);

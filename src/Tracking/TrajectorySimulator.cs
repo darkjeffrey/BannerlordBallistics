@@ -9,227 +9,213 @@ using TaleWorlds.MountAndBlade;
 namespace ProjectileLandingTracker.Tracking
 {
     /// <summary>
-    /// Steps a projectile through gravity and air drag until it hits an agent, the terrain or a scene object.
-    /// Agents are approximated as vertical cylinders; the scene is queried with the engine's raycasts.
+    /// Steps a projectile through gravity and air drag until the engine's raycasts report it hitting a unit,
+    /// the terrain or a scene object.
     /// </summary>
     internal sealed class TrajectorySimulator
     {
-        private const float Gravity = 9.8f;            // m/s^2
         private const float StepSeconds = 0.02f;
+        private const float CoarseStepSeconds = 0.05f;
         private const float RaycastThickness = 0.01f;
 
-        // Agent hit volumes: vertical cylinders standing on the agent's position.
-        private const float HumanHeight = 1.9f;
-        private const float HumanRadius = 0.4f;
-        private const float MountHeight = 1.7f;
-        private const float MountRadius = 0.6f;
+        // A unit the shot passes through (own mount, riderless horse, untracked side) can hide one behind it,
+        // so the agent ray restarts just past it.
+        private const int MaxSkippedAgentsPerStep = 6;
+        private const float SkipPastAgentMetres = 0.3f;
 
-        // Body types a missile ignores. A raw raycast also hits physics bodies that exist only for other
-        // purposes (invisible barriers, AI limiters, agent-only collision shapes), which stopped the
-        // prediction in mid-air. CommonCollisionExcludeFlagsForMissile (0x2031B789 in v1.4.8) is the set the
-        // game uses for missiles: like the combat set, plus Barrier and Barrier3D. Enum values are
-        // compiled into this DLL, so there is no runtime lookup that could fail.
+        // The body types the game's own missiles pass through (barriers, AI limiters, agent-only shapes).
         private const BodyFlags MissileExcludedBodyFlags = BodyFlags.CommonCollisionExcludeFlagsForMissile;
 
-        private struct Target
-        {
-            public Vec3 Position;
-            public float Height;
-            public float Radius;
-            public bool IsEnemy;
-        }
+        private static float Gravity => MBGlobals.Gravity;
 
-        private readonly List<Target> _targets = new List<Target>();
         private readonly List<Vec3> _path = new List<Vec3>();
         private readonly SiegeSource _siege;
+        private Agent _shooter;
+        private Agent _shooterMount;
+        private int _shooterIndex = -1;
 
         public TrajectorySimulator(SiegeSource siege)
         {
             _siege = siege;
         }
 
-        /// <summary>The points of the last simulated flight, if path recording was requested.</summary>
         public IReadOnlyList<Vec3> Path => _path;
 
-        /// <summary>
-        /// What stopped the last simulated flight, for the debug readout: "terrain", "agent", or the scene
-        /// entity's name and body flags.
-        /// </summary>
+        /// <summary>What stopped the last flight, for the debug readout.</summary>
         public string LastHitDescription { get; private set; } = "";
 
-        /// <summary>Whether a shot is a hand-held weapon or a siege engine; decides the limits used.</summary>
         public struct ShotLimits
         {
-            /// <summary>
-            /// Drag, as the game applies it: speed -= AirFriction * speed^2 * dt. 0 = no drag.
-            /// Set per shot from the missile item (arrow, bolt, thrown weapon or siege projectile).
-            /// </summary>
+            /// <summary>The game's drag: speed -= AirFriction * speed^2 * dt.</summary>
             public float AirFriction;
             public float MaxFlightSeconds;
+            /// <summary>Distance from launch within which nothing is hit (a siege engine and its crew).</summary>
             public float IgnoreNearMetres;
-            public float TargetRange;
-            public bool IsSiege;
 
-            public static readonly ShotLimits Handheld = new ShotLimits
-            {
-                MaxFlightSeconds = 6f,
-                IgnoreNearMetres = 0f,
-                TargetRange = 250f,
-                IsSiege = false
-            };
-
-            /// <summary>Siege shots fly farther, and must ignore the engine and crew at launch.</summary>
-            public static readonly ShotLimits Siege = new ShotLimits
-            {
-                MaxFlightSeconds = 15f,
-                IgnoreNearMetres = 5f,
-                TargetRange = 600f,
-                IsSiege = true
-            };
+            public static readonly ShotLimits Handheld = new ShotLimits { MaxFlightSeconds = 6f };
+            public static readonly ShotLimits Siege = new ShotLimits { MaxFlightSeconds = 15f, IgnoreNearMetres = 5f };
         }
 
-        /// <summary>Snapshots the agents that can block the shot, according to the settings.</summary>
-        public void CollectTargets(Mission mission, Agent player, Vec3 origin, float range)
+        /// <summary>The shooter and its mount never block the prediction.</summary>
+        public void SetShooter(Agent shooter)
         {
-            _targets.Clear();
-
-            bool includeEnemies = TrackerConfig.StopAtEnemies;
-            bool includeFriendlies = TrackerConfig.FriendlyFireWarning;
-            if (!includeEnemies && !includeFriendlies)
-                return;
-
-            float rangeSquared = range * range;
-            Agent playerMount = player.MountAgent;
-
-            foreach (Agent agent in mission.Agents)
-            {
-                if (agent == null || agent == player || agent == playerMount || !agent.IsActive())
-                    continue;
-
-                bool isMount = agent.IsMount;
-                bool isEnemy;
-
-                if (isMount)
-                {
-                    Agent rider = agent.RiderAgent;   // riderless horses don't block shots
-                    if (rider == null)
-                        continue;
-                    isEnemy = rider.IsEnemyOf(player);
-                }
-                else
-                {
-                    isEnemy = agent.IsEnemyOf(player);
-                }
-
-                if (isEnemy ? !includeEnemies : !includeFriendlies)
-                    continue;
-
-                Vec3 position = agent.Position;
-                if ((position - origin).LengthSquared > rangeSquared)
-                    continue;
-
-                _targets.Add(new Target
-                {
-                    Position = position,
-                    Height = isMount ? MountHeight : HumanHeight,
-                    Radius = isMount ? MountRadius : HumanRadius,
-                    IsEnemy = isEnemy
-                });
-            }
+            _shooter = shooter;
+            _shooterMount = shooter?.MountAgent;
+            _shooterIndex = shooter?.Index ?? -1;
         }
 
-        /// <summary>
-        /// Simulates a flight. Returns false if the projectile never hits anything within the time limit.
-        /// </summary>
+        /// <summary>Returns false if the projectile hits nothing within the time limit.</summary>
         public bool Simulate(Mission mission, Vec3 start, Vec3 velocity, ShotLimits limits, bool recordPath,
                              out Vec3 impact, out HitKind kind)
         {
             impact = start;
             kind = HitKind.Ground;
             LastHitDescription = "nothing";
-
             _path.Clear();
-            if (recordPath)
-                _path.Add(start);
 
             Vec3 position = start;
-            Vec3 current = velocity;
-
             for (float t = 0f; t < limits.MaxFlightSeconds; t += StepSeconds)
             {
-                Vec3 next = position + current * StepSeconds;
-                next.z -= 0.5f * Gravity * StepSeconds * StepSeconds;
+                if (recordPath)
+                    _path.Add(position);
 
-                // Drag along the direction of flight, using the game's formula
-                // (managed_core_parameters.xml: speed -= air_friction_constant * speed^2 * dt).
-                if (limits.AirFriction > 0f)
+                Vec3 next = Advance(position, ref velocity, limits.AirFriction, StepSeconds);
+                if (!IsNearLaunch(position, start, limits))
                 {
-                    float speed = current.Length;
-                    float slowdown = 1f - limits.AirFriction * speed * StepSeconds;
-                    current *= slowdown > 0f ? slowdown : 0f;
-                }
+                    bool sceneHit = RaycastScene(mission, position, next, out float sceneDistance, out Vec3 scenePoint,
+                        out WeakGameEntity sceneEntity);
+                    bool agentHit = TryHitAgent(mission, position, next, out float agentDistance, out Vec3 agentPoint,
+                        out bool agentIsEnemy);
 
-                current.z -= Gravity * StepSeconds;
+                    if (agentHit && (!sceneHit || agentDistance <= sceneDistance))
+                    {
+                        impact = agentPoint;
+                        kind = agentIsEnemy ? HitKind.Enemy : HitKind.Friendly;
+                        LastHitDescription = agentIsEnemy ? "enemy agent" : "friendly agent";
+                    }
+                    else if (sceneHit)
+                    {
+                        impact = scenePoint;
+                        kind = TrackerConfig.MarkSiegeEngineHits && HitsOtherSiegeEngine(sceneEntity)
+                            ? HitKind.SiegeEngine
+                            : HitKind.Ground;
+                        if (TrackerConfig.DebugHitInfo)
+                            LastHitDescription = Describe(sceneEntity);
+                    }
 
-                // Right after launch, don't collide with the engine itself or the crew operating it.
-                if (limits.IgnoreNearMetres > 0f
-                    && (position - start).LengthSquared < limits.IgnoreNearMetres * limits.IgnoreNearMetres)
-                {
-                    position = next;
-                    if (recordPath) _path.Add(position);
-                    continue;
-                }
-
-                bool sceneHit = mission.Scene.RayCastForClosestEntityOrTerrain(
-                    position, next, out float sceneDistance, out Vec3 scenePoint, out WeakGameEntity sceneEntity,
-                    RaycastThickness, MissileExcludedBodyFlags);
-
-                float segmentLength = (next - position).Length;
-                bool agentHit = TryHitAgent(position, next, segmentLength,
-                    out float agentDistance, out Vec3 agentPoint, out bool agentIsEnemy);
-
-                if (agentHit && (!sceneHit || agentDistance <= sceneDistance))
-                {
-                    impact = agentPoint;
-                    kind = agentIsEnemy ? HitKind.Enemy : HitKind.Friendly;
-                    LastHitDescription = agentIsEnemy ? "enemy agent" : "friendly agent";
-                    if (recordPath) _path.Add(agentPoint);
-                    return true;
-                }
-
-                if (sceneHit)
-                {
-                    impact = scenePoint;
-                    // Any shot can hit a siege engine: a ballista bolt, or a stone thrown at a battering ram.
-                    kind = TrackerConfig.MarkSiegeEngineHits && HitsOtherSiegeEngine(sceneEntity)
-                        ? HitKind.SiegeEngine
-                        : HitKind.Ground;
-                    if (TrackerConfig.DebugHitInfo)
-                        LastHitDescription = Describe(sceneEntity);
-                    if (recordPath) _path.Add(scenePoint);
-                    return true;
+                    if (agentHit || sceneHit)
+                    {
+                        if (recordPath)
+                            _path.Add(impact);
+                        return true;
+                    }
                 }
 
                 position = next;
-                if (recordPath) _path.Add(position);
             }
-
             return false;
+        }
+
+        /// <summary>Where a shot first hits terrain or a scene object, ignoring units; cheap and coarse.</summary>
+        public bool FindGroundImpact(Mission mission, Vec3 start, Vec3 velocity, ShotLimits limits, out Vec3 impact)
+        {
+            impact = start;
+            Vec3 position = start;
+            for (float t = 0f; t < limits.MaxFlightSeconds; t += CoarseStepSeconds)
+            {
+                Vec3 next = Advance(position, ref velocity, limits.AirFriction, CoarseStepSeconds);
+                if (!IsNearLaunch(position, start, limits)
+                    && RaycastScene(mission, position, next, out float _, out impact, out WeakGameEntity _))
+                    return true;
+                position = next;
+            }
+            return false;
+        }
+
+        private static Vec3 Advance(Vec3 position, ref Vec3 velocity, float airFriction, float dt)
+        {
+            Vec3 next = position + velocity * dt;
+            next.z -= 0.5f * Gravity * dt * dt;
+
+            if (airFriction > 0f)
+                velocity *= Math.Max(0f, 1f - airFriction * velocity.Length * dt);
+
+            velocity.z -= Gravity * dt;
+            return next;
+        }
+
+        private static bool IsNearLaunch(Vec3 position, Vec3 start, ShotLimits limits)
+        {
+            return (position - start).LengthSquared < limits.IgnoreNearMetres * limits.IgnoreNearMetres;
+        }
+
+        private static bool RaycastScene(Mission mission, Vec3 from, Vec3 to, out float distance, out Vec3 point,
+                                         out WeakGameEntity entity)
+        {
+            return mission.Scene.RayCastForClosestEntityOrTerrain(from, to, out distance, out point, out entity,
+                RaycastThickness, MissileExcludedBodyFlags);
+        }
+
+        private bool TryHitAgent(Mission mission, Vec3 from, Vec3 to,
+                                 out float hitDistance, out Vec3 hitPoint, out bool hitIsEnemy)
+        {
+            hitDistance = 0f;
+            hitPoint = to;
+            hitIsEnemy = false;
+
+            bool includeEnemies = TrackerConfig.StopAtEnemies;
+            bool includeFriendlies = TrackerConfig.FriendlyFireWarning;
+            Vec3 segment = to - from;
+            float length = segment.Length;
+            if (!(includeEnemies || includeFriendlies) || length < 0.00001f)
+                return false;
+
+            Vec3 direction = segment * (1f / length);
+            float travelled = 0f;
+            for (int attempt = 0; attempt <= MaxSkippedAgentsPerStep && travelled < length; attempt++)
+            {
+                Agent agent = mission.RayCastForClosestAgent(from + direction * travelled, to, _shooterIndex,
+                    RaycastThickness, out float distance);
+                travelled += distance;
+                if (agent == null || travelled > length)
+                    return false;
+
+                if (TryClassify(agent, out bool isEnemy) && (isEnemy ? includeEnemies : includeFriendlies))
+                {
+                    hitDistance = travelled;
+                    hitPoint = from + direction * travelled;
+                    hitIsEnemy = isEnemy;
+                    return true;
+                }
+
+                travelled += SkipPastAgentMetres;
+            }
+            return false;
+        }
+
+        /// <summary>A mount counts as its rider; riderless horses and the shooter's own mount don't block.</summary>
+        private bool TryClassify(Agent agent, out bool isEnemy)
+        {
+            isEnemy = false;
+            if (_shooter == null || agent == _shooter || agent == _shooterMount || !agent.IsActive())
+                return false;
+
+            Agent side = agent.IsMount ? agent.RiderAgent : agent;
+            if (side == null || side == _shooter)
+                return false;
+
+            isEnemy = side.IsEnemyOf(_shooter);
+            return true;
         }
 
         private bool HitsOtherSiegeEngine(WeakGameEntity entity)
         {
-            // Terrain, or a body the engine can't name: not a siege engine.
-            if (!entity.IsValid)
-                return false;
-
             try
             {
-                return _siege.IsOtherMachine(entity);
+                return entity.IsValid && _siege.IsOtherMachine(entity);
             }
             catch (Exception)
             {
-                // Treat an unexpected engine failure as "not a siege engine".
                 return false;
             }
         }
@@ -241,63 +227,13 @@ namespace ProjectileLandingTracker.Tracking
 
             try
             {
-                string name = entity.Name;
-                return (string.IsNullOrEmpty(name) ? "(unnamed entity)" : name)
-                       + " [body " + entity.BodyFlag + " | phys " + entity.PhysicsDescBodyFlag + "]";
+                string name = string.IsNullOrEmpty(entity.Name) ? "(unnamed entity)" : entity.Name;
+                return name + " [body " + entity.BodyFlag + " | phys " + entity.PhysicsDescBodyFlag + "]";
             }
             catch (Exception)
             {
                 return "(entity)";
             }
-        }
-
-        // Segment vs. vertical cylinder for every target; reports the earliest hit.
-        private bool TryHitAgent(Vec3 a, Vec3 b, float segmentLength,
-                                 out float hitDistance, out Vec3 hitPoint, out bool hitIsEnemy)
-        {
-            hitDistance = float.MaxValue;
-            hitPoint = b;
-            hitIsEnemy = false;
-            bool found = false;
-
-            float dx = b.x - a.x;
-            float dy = b.y - a.y;
-            float horizontalLengthSquared = dx * dx + dy * dy;
-
-            foreach (Target target in _targets)
-            {
-                Vec3 p = target.Position;
-
-                // Parameter of the segment point closest (horizontally) to the cylinder axis.
-                float t = 0f;
-                if (horizontalLengthSquared > 0.000001f)
-                {
-                    t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / horizontalLengthSquared;
-                    t = Math.Max(0f, Math.Min(1f, t));
-                }
-
-                float cx = a.x + dx * t;
-                float cy = a.y + dy * t;
-                float cz = a.z + (b.z - a.z) * t;
-
-                float ox = cx - p.x;
-                float oy = cy - p.y;
-                if (ox * ox + oy * oy > target.Radius * target.Radius)
-                    continue;
-                if (cz < p.z || cz > p.z + target.Height)
-                    continue;
-
-                float distance = t * segmentLength;
-                if (distance < hitDistance)
-                {
-                    hitDistance = distance;
-                    hitPoint = new Vec3(cx, cy, cz);
-                    hitIsEnemy = target.IsEnemy;
-                    found = true;
-                }
-            }
-
-            return found;
         }
     }
 }

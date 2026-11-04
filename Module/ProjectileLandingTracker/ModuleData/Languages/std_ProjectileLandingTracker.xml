@@ -26,6 +26,8 @@
     <string id="plt_mcm_TrackSiegeEngines_hint" text="Show the landing prediction while you operate a ballista, catapult or trebuchet." />
     <string id="plt_mcm_MarkSiegeEngineHits" text="Highlight hits on siege engines" />
     <string id="plt_mcm_MarkSiegeEngineHits_hint" text="When a shot would hit a siege engine (ballista, catapult, trebuchet, ram or siege tower), the marker and crosshair turn light blue. Works for siege engine shots and for bows, crossbows and thrown weapons, such as a stone thrown at a battering ram." />
+    <string id="plt_mcm_ShowSpreadRing" text="Show spread ring" />
+    <string id="plt_mcm_ShowSpreadRing_hint" text="Draws a ring around the landing marker showing how far the game's random aiming error can scatter a siege shot. The shot can land anywhere inside the ring; the marker is its centre." />
     <string id="plt_mcm_group_landing_marker" text="Landing marker" />
     <string id="plt_mcm_ShowMarker" text="Show landing marker" />
     <string id="plt_mcm_ShowMarker_hint" text="Sphere drawn where the projectile is predicted to land." />

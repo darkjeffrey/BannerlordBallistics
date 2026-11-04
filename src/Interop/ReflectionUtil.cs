@@ -5,10 +5,8 @@ using System.Reflection;
 namespace ProjectileLandingTracker.Interop
 {
     /// <summary>
-    /// Reflection helpers for reading game internals (private fields, UI types, engine classes) that are
-    /// not part of the public API. Lookups are cached, and every read is defensive: a missing member or a
-    /// throwing getter yields <c>null</c> instead of an exception, so a game update can only ever disable
-    /// a feature rather than crash the mission. Not thread-safe; use from the game's main thread only.
+    /// Cached reflection reads of non-public game members. A missing member or throwing getter yields null,
+    /// so a game update can disable a feature but never crash the mission. Main thread only.
     /// </summary>
     internal static class ReflectionUtil
     {
@@ -69,10 +67,7 @@ namespace ProjectileLandingTracker.Interop
             }
         }
 
-        /// <summary>
-        /// Reads an instance property or field (public or not) by name, searching base classes too.
-        /// Returns null if the member doesn't exist or can't be read.
-        /// </summary>
+        /// <summary>Reads an instance property or field (public or not), searching base classes.</summary>
         public static object GetMember(object instance, string name)
         {
             if (instance == null)
