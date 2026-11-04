@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - Fix: hand-held shots now include the shooter's missile speed multiplier, as the game does, so the
   predicted range matches when a skill, perk or setting changes it.
