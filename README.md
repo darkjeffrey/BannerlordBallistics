@@ -1,6 +1,6 @@
 # Projectile Landing Tracker
 
-A Mount & Blade II: Bannerlord (v1.4.8) mod that shows where your shot will land: arrows, bolts, javelins
+A Mount & Blade II: Bannerlord (v1.5.7) mod that shows where your shot will land: arrows, bolts, javelins
 and thrown weapons, plus ballistae, catapults and trebuchets.
 
 ## Features

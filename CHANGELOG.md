@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Updated for Bannerlord v1.5.7.
+- The launcher no longer shows a dependency version warning: every required module now lists the version it was built against.
+
 ## 1.1.0
 
 - Fix: hand-held shots now include the shooter's missile speed multiplier, as the game does, so the

@@ -7,3 +7,6 @@ obj/
 *.pdb
 *.zip
 handoff.md
+
+# Packaged zips
+release/

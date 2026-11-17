@@ -1,0 +1,72 @@
+# Publishes a GitHub Release to Nexus Mods as a new version of the mod's main file.
+#
+# The mod can't be built here (it needs the game's DLLs), so the release must carry the zip made by
+# `bltools.py package BannerlordBallistics`. The Nexus API key lives in the repository secret NEXUS_API_KEY: GitHub
+# encrypts it, hides it in logs and never gives it to workflows started from forks or pull requests.
+
+name: Publish to Nexus Mods
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  NEXUS_MOD_ID: "13632226211474"   # Bannerlord Ballistics (nexusmods.com/mountandblade2bannerlord/mods/13970)
+  NEXUS_FILE_ID: "8140899"         # the BannerlordBallistics main file (Manage files > Advanced > API File ID)
+  NEXUS_FILE_NAME: BannerlordBallistics
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Download the release zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.zip' --dir release
+          ls release/*.zip
+
+      - name: Check the version and read its changelog
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          zip=$(ls release/*.zip | head -n 1)
+          submodule_version=$(grep -o '<Version value="v[^"]*"' Module/ProjectileLandingTracker/SubModule.xml | sed 's/.*"v\(.*\)"/\1/')
+          zipped_version=$(unzip -p "$zip" '*/SubModule.xml' | grep -o '<Version value="v[^"]*"' | sed 's/.*"v\(.*\)"/\1/')
+          if [ "$version" != "$submodule_version" ] || [ "$version" != "$zipped_version" ]; then
+            echo "::error::Tag $TAG, SubModule.xml v$submodule_version and the zip's v$zipped_version must match"
+            exit 1
+          fi
+          changelog=$(awk -v v="## $version" '$0 == v {found=1; next} /^## / {found=0} found && /^- / {sub(/^- /, ""); print}' CHANGELOG.md)
+          if [ -z "$changelog" ]; then
+            echo "::error::CHANGELOG.md has no '## $version' section"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "zip=$zip"
+            echo "changelog<<CHANGELOG_END"
+            echo "$changelog"
+            echo "CHANGELOG_END"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Nexus Mods
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2 # v1.0.0-beta.11
+        with:
+          api_key: ${{ secrets.NEXUS_API_KEY }}
+          mod_id: ${{ env.NEXUS_MOD_ID }}
+          file_id: ${{ env.NEXUS_FILE_ID }}
+          filename: ${{ steps.release.outputs.zip }}
+          display_name: ${{ env.NEXUS_FILE_NAME }}
+          version: ${{ steps.release.outputs.version }}
+          update_mod_version: true
+          changelog: ${{ steps.release.outputs.changelog }}

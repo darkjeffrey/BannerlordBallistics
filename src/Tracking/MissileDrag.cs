@@ -8,7 +8,7 @@ namespace ProjectileLandingTracker.Tracking
     /// Reads the air drag the game applies to a missile, the same way the game does:
     /// ItemObject.GetAirFrictionConstant(class, flags) of the missile's consumable usage
     /// (see MissionWeapon.GetWeaponData and RangedSiegeWeapon.GetTargetReleaseAngle).
-    /// The values come from Native/ModuleData/managed_core_parameters.xml. In v1.4.8: arrows and bolts 0.003,
+    /// The values come from Native/ModuleData/managed_core_parameters.xml. In v1.5.7: arrows and bolts 0.003,
     /// javelins 0.002, throwing axes, knives and stones 0.007, siege projectiles 0.001.
     /// Every method returns 0 (no drag) if the value can't be read.
     /// </summary>

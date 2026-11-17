@@ -41,8 +41,8 @@ namespace ProjectileLandingTracker.Tracking
 
         public Vec3 ToLocal(Vec3 world)
         {
-            Vec3 d = world - Origin;
-            return new Vec3(Vec3.DotProduct(d, Side), Vec3.DotProduct(d, Forward), Vec3.DotProduct(d, Up));
+            Vec3 offset = world - Origin;
+            return new Vec3(Vec3.DotProduct(offset, Side), Vec3.DotProduct(offset, Forward), Vec3.DotProduct(offset, Up));
         }
 
         public Vec3 ToWorld(Vec3 local)

@@ -2,17 +2,17 @@
 <Module>
   <Name value="Projectile Landing Tracker"/>
   <Id value="ProjectileLandingTracker"/>
-  <Version value="v1.1.0"/>
+  <Version value="v1.1.1"/>
   <SingleplayerModule value="true"/>
   <MultiplayerModule value="false"/>
   <DependedModules>
-    <DependedModule Id="Native"/>
-    <DependedModule Id="SandBoxCore"/>
-    <DependedModule Id="Sandbox"/>
-    <DependedModule Id="Bannerlord.Harmony"/>
-    <DependedModule Id="Bannerlord.ButterLib"/>
-    <DependedModule Id="Bannerlord.UIExtenderEx"/>
-    <DependedModule Id="Bannerlord.MBOptionScreen"/>
+    <DependedModule Id="Native" DependentVersion="v1.5.7"/>
+    <DependedModule Id="SandBoxCore" DependentVersion="v1.5.7"/>
+    <DependedModule Id="Sandbox" DependentVersion="v1.5.7"/>
+    <DependedModule Id="Bannerlord.Harmony" DependentVersion="v2.4.2.248"/>
+    <DependedModule Id="Bannerlord.ButterLib" DependentVersion="v2.12.0"/>
+    <DependedModule Id="Bannerlord.UIExtenderEx" DependentVersion="v3.0.3"/>
+    <DependedModule Id="Bannerlord.MBOptionScreen" DependentVersion="v5.13.1"/>
   </DependedModules>
   <SubModules>
     <SubModule>
